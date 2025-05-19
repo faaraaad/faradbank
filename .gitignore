@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Django/Python specific:
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+*.log
+server.log
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables / secret files
+.env
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE / Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
