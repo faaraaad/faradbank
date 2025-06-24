@@ -28,3 +28,16 @@ def save_user_profile(sender, instance, **kwargs):
         instance.profile.save()
 
 
+class InvestmentPlan(models.Model):
+    id = models.CharField(max_length=10, primary_key=True) # e.g. '1m', '3m', '6m', '1y', '2y', '5y'
+    name = models.CharField(max_length=100)
+    duration_months = models.IntegerField()
+    interest_rate_apy = models.DecimalField(max_digits=5, decimal_places=2) # e.g. 12.00 for 12%
+    min_deposit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('100.00'))
+    is_cancellable = models.BooleanField(default=True)
+    cancellation_penalty_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('10.00'))
+
+    def __str__(self):
+        return f"{self.name} ({self.interest_rate_apy}% APY)"
+
+
