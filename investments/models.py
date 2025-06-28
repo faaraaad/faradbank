@@ -41,3 +41,27 @@ class InvestmentPlan(models.Model):
         return f"{self.name} ({self.interest_rate_apy}% APY)"
 
 
+class Contract(models.Model):
+    STATUS_CHOICES = (
+        ('ACTIVE', 'Active'),
+        ('PENDING_CANCELLATION', 'Pending Cancellation'),
+        ('CANCELLED', 'Cancelled'),
+        ('MATURED', 'Matured'),
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='contracts')
+    plan = models.ForeignKey(InvestmentPlan, on_delete=models.PROTECT, related_name='contracts')
+    principal = models.DecimalField(max_digits=15, decimal_places=2)
+    interest_rate_apy = models.DecimalField(max_digits=5, decimal_places=2) # APY locked at contract start
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='ACTIVE')
+    start_date = models.DateField()
+    maturity_date = models.DateField()
+    auto_renew = models.BooleanField(default=False)
+    mt5_account_id = models.CharField(max_length=50, blank=True, null=True)
+    pending_upgrade_apy = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True) # delayed rate change for next month
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Contract #{self.id} - {self.user.username} - {self.principal} USDT ({self.plan.id})"
+
+
