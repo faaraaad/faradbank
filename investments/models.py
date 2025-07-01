@@ -65,3 +65,17 @@ class Contract(models.Model):
         return f"Contract #{self.id} - {self.user.username} - {self.principal} USDT ({self.plan.id})"
 
 
+class DailyInterestLog(models.Model):
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='daily_interest_logs')
+    date = models.DateField()
+    amount = models.DecimalField(max_digits=15, decimal_places=6)
+    is_paid = models.BooleanField(default=False) # Whether it has been paid in a monthly payout
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('contract', 'date')
+
+    def __str__(self):
+        return f"Daily Log Contract #{self.contract.id} on {self.date}: {self.amount} USDT"
+
+
