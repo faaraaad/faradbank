@@ -100,3 +100,25 @@ class WalletTransaction(models.Model):
         return f"Tx #{self.id} - {self.user.username} - {self.amount} USDT ({self.type})"
 
 
+class CancellationRequest(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending Approval'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    )
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='cancellation_requests')
+    requested_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_cancellations')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    penalty_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    clawback_interest_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    estimated_refund_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    refund_date = models.DateField() # Scheduled refund payout date (3rd to 5th of next month)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_cancellations')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return f"Cancel Request #{self.id} - Contract #{self.contract.id} ({self.status})"
+
+
