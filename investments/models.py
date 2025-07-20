@@ -122,3 +122,25 @@ class CancellationRequest(models.Model):
         return f"Cancel Request #{self.id} - Contract #{self.contract.id} ({self.status})"
 
 
+class IntegrationLog(models.Model):
+    STATUS_CHOICES = (
+        ('SUCCESS', 'Success'),
+        ('FAILED', 'Failed'),
+    )
+    action = models.CharField(max_length=50) # e.g. 'MT5_CREATE_ACCOUNT', 'MT5_LOCK_BALANCE'
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True)
+    request_payload = models.TextField()
+    response_payload = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Log #{self.id} - {self.action} ({self.status})"
+
+
+class SimulationState(models.Model):
+    virtual_date = models.DateField(default=date.today)
+
+    def __str__(self):
+        return f"Virtual Date: {self.virtual_date}"
+
