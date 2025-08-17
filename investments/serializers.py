@@ -80,3 +80,15 @@ class ContractSerializer(serializers.ModelSerializer):
         return max(0, days)
 
 
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WalletTransaction
+        fields = ['id', 'user', 'contract', 'amount', 'type', 'description', 'created_at']
+
+
+
+
+class IntegrationLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntegrationLog
+        fields = ['id', 'action', 'contract', 'request_payload', 'response_payload', 'status', 'created_at']
