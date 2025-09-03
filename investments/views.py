@@ -58,3 +58,36 @@ class AuthLoginView(APIView):
         })
 
 
+class WalletView(APIView):
+    def get(self, request):
+        username = request.query_params.get('username')
+        if not username:
+            return Response({"error": "Username required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        serializer = UserSerializer(user)
+        return Response(serializer.data['profile'])
+
+    def post(self, request):
+        # Allow topping up the wallet to simulate CRM inputs
+        username = request.data.get('username')
+        amount = request.data.get('amount')
+        
+        if not username or not amount:
+            return Response({"error": "Username and amount are required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            user = User.objects.get(username=username)
+            amount_dec = Decimal(str(amount))
+        except (User.DoesNotExist, ValueError):
+            return Response({"error": "Invalid user or amount"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        CRMService.credit_wallet(user, amount_dec, tx_type='DEPOSIT', description="CRM Wallet External Topup")
+        serializer = UserSerializer(user)
+        return Response(serializer.data['profile'])
+
+
