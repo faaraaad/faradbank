@@ -91,3 +91,14 @@ class WalletView(APIView):
         return Response(serializer.data['profile'])
 
 
+class TransactionHistoryView(APIView):
+    def get(self, request):
+        username = request.query_params.get('username')
+        if not username:
+            return Response({"error": "Username required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        txs = WalletTransaction.objects.filter(user__username=username).order_by('-created_at')
+        serializer = WalletTransactionSerializer(txs, many=True)
+        return Response(serializer.data)
+
+
