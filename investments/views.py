@@ -102,3 +102,23 @@ class TransactionHistoryView(APIView):
         return Response(serializer.data)
 
 
+class InvestmentPlanViewSet(viewsets.ModelViewSet):
+    queryset = InvestmentPlan.objects.all().order_by('duration_months')
+    serializer_class = InvestmentPlanSerializer
+
+    def update(self, request, *pk_dict, **kwargs):
+        # Admin can update plan interest rate or minimum deposit
+        instance = self.get_object()
+        
+        rate = request.data.get('interest_rate_apy')
+        min_dep = request.data.get('min_deposit')
+        
+        if rate is not None:
+            instance.interest_rate_apy = Decimal(str(rate))
+        if min_dep is not None:
+            instance.min_deposit = Decimal(str(min_dep))
+            
+        instance.save()
+        return Response(self.get_serializer(instance).data)
+
+
