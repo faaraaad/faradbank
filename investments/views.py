@@ -122,3 +122,81 @@ class InvestmentPlanViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(instance).data)
 
 
+class ContractViewSet(viewsets.ModelViewSet):
+    serializer_class = ContractSerializer
+
+    def get_queryset(self):
+        username = self.request.query_params.get('username')
+        virtual_date = get_current_virtual_date()
+        
+        # Provide current virtual date in context for progress calculations
+        self.context = {'virtual_date': virtual_date}
+        
+        if username:
+            return Contract.objects.filter(user__username=username).order_by('-created_at')
+        return Contract.objects.all().order_by('-created_at')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['virtual_date'] = get_current_virtual_date()
+        return context
+
+    def create(self, request, *args, **kwargs):
+        username = request.data.get('username')
+        plan_id = request.data.get('plan')
+        principal = request.data.get('principal')
+        auto_renew = request.data.get('auto_renew', False)
+
+        if not username or not plan_id or not principal:
+            return Response({"error": "username, plan, and principal are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+            plan = InvestmentPlan.objects.get(id=plan_id)
+            principal_dec = Decimal(str(principal))
+        except (User.DoesNotExist, InvestmentPlan.DoesNotExist, ValueError):
+            return Response({"error": "Invalid user, plan, or principal"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if principal_dec < plan.min_deposit:
+            return Response({"error": f"Minimum deposit for this plan is {plan.min_deposit} USDT"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.profile.balance < principal_dec:
+            return Response({"error": "Insufficient CRM wallet balance"}, status=status.HTTP_400_BAD_REQUEST)
+
+        virtual_date = get_current_virtual_date()
+        # Compute maturity date
+        # 1 month is approx 30 days, or we can add precise months
+        days_to_add = plan.duration_months * 30
+        maturity_date = virtual_date + timedelta(days=days_to_add)
+
+        with transaction.atomic():
+            # Create Contract
+            contract = Contract.objects.create(
+                user=user,
+                plan=plan,
+                principal=principal_dec,
+                interest_rate_apy=plan.interest_rate_apy,
+                status='ACTIVE',
+                start_date=virtual_date,
+                maturity_date=maturity_date,
+                auto_renew=auto_renew
+            )
+
+            # Block wallet in CRM
+            CRMService.debit_wallet(
+                user=user,
+                amount=principal_dec,
+                contract=contract,
+                tx_type='INVESTMENT',
+                description=f"Locked liquidity into {plan.name} (Contract #{contract.id})"
+            )
+
+            # Create MT5 read-only account
+            MT5Service.create_readonly_account(contract)
+
+            # Push balance to MT5 account
+            MT5Service.lock_balance(contract)
+
+        serializer = self.get_serializer(contract)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
