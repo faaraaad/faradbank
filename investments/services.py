@@ -63,3 +63,42 @@ class CRMService:
             )
             return tx
 
+
+class MT5Service:
+    @staticmethod
+    def create_readonly_account(contract):
+        # Simulates creating a Read-Only MT5 account for this investment contract
+        login = random.randint(5000000, 9999999)
+        ro_password = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789", k=10))
+        group = f"FaradBank_ReadOnly_{contract.plan.id.upper()}"
+        
+        request_data = {
+            "Action": "AccountCreate",
+            "Name": f"{contract.user.username}_c{contract.id}",
+            "Group": group,
+            "Leverage": "1:1",
+            "ReadOnly": True,
+            "Comment": f"Blocked contract sub-account for {contract.principal} USDT"
+        }
+        
+        response_data = {
+            "RetCode": "0 Done",
+            "Login": login,
+            "PasswordReadOnly": ro_password,
+            "Server": "FaradBank-Live",
+            "Time": timezone.now().strftime('%Y.%m.%d %H:%M:%S')
+        }
+        
+        IntegrationLog.objects.create(
+            action='MT5_CREATE_ACCOUNT',
+            contract=contract,
+            request_payload=json.dumps(request_data, indent=2),
+            response_payload=json.dumps(response_data, indent=2),
+            status='SUCCESS'
+        )
+        
+        contract.mt5_account_id = str(login)
+        contract.save()
+        
+        return login, ro_password
+
