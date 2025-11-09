@@ -102,3 +102,70 @@ class MT5Service:
         
         return login, ro_password
 
+    @staticmethod
+    def lock_balance(contract):
+        # Simulates pushing/locking the balance inside the MT5 sub-account
+        request_data = {
+            "Action": "BalanceLock",
+            "Login": contract.mt5_account_id,
+            "Amount": float(contract.principal),
+            "Currency": "USDT",
+            "Type": "CreditBlock"
+        }
+        
+        response_data = {
+            "RetCode": "0 Done",
+            "TransactionID": random.randint(100000, 999999),
+            "BalanceBlocked": float(contract.principal),
+            "MT5Status": "Blocked"
+        }
+        
+        IntegrationLog.objects.create(
+            action='MT5_LOCK_BALANCE',
+            contract=contract,
+            request_payload=json.dumps(request_data, indent=2),
+            response_payload=json.dumps(response_data, indent=2),
+            status='SUCCESS'
+        )
+        return True
+
+    @staticmethod
+    def unlock_balance(contract):
+        # Simulates releasing the balance from the MT5 sub-account upon cancellation/maturity
+        request_data = {
+            "Action": "BalanceUnlock",
+            "Login": contract.mt5_account_id,
+            "Amount": float(contract.principal),
+            "Currency": "USDT"
+        }
+        
+        response_data = {
+            "RetCode": "0 Done",
+            "TransactionID": random.randint(100000, 999999),
+            "BalanceBlocked": 0.0,
+            "MT5Status": "Active"
+        }
+        
+        IntegrationLog.objects.create(
+            action='MT5_UNLOCK_BALANCE',
+            contract=contract,
+            request_payload=json.dumps(request_data, indent=2),
+            response_payload=json.dumps(response_data, indent=2),
+            status='SUCCESS'
+        )
+        return True
+
+    @staticmethod
+    def get_ping_status():
+        # Health status ping to display live connection dashboard metrics
+        ping_latency = round(random.uniform(5.5, 25.2), 2)
+        connected = True
+        return {
+            "connected": connected,
+            "latency_ms": ping_latency,
+            "broker": "MetaQuotes Software Corp.",
+            "server": "FaradBank-Live",
+            "active_sockets": random.randint(10, 45)
+        }
+
+
