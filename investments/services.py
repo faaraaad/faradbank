@@ -169,3 +169,81 @@ class MT5Service:
         }
 
 
+class InterestEngineService:
+    @staticmethod
+    def calculate_daily_interest(target_date):
+        """
+        Calculates daily interest for all ACTIVE contracts.
+        Daily Interest = (Principal * (APY / 100)) / 365
+        """
+        active_contracts = Contract.objects.filter(status='ACTIVE')
+        logs_created = 0
+
+        for contract in active_contracts:
+            # Check if plan upgrade will change rate from this month
+            # Interest rate is locked inside contract, but if there was an upgrade,
+            # we check if a plan change applies starting the 1st of the following month.
+            # (Upgrade logic is handled by changing contract.interest_rate_apy when month flips)
+            
+            # Check if this date already has an interest log for this contract
+            if DailyInterestLog.objects.filter(contract=contract, date=target_date).exists():
+                continue
+                
+            # If contract is already past maturity, handle automatic renewal or mature it
+            if target_date > contract.maturity_date:
+                if contract.auto_renew:
+                    # Auto-renew principal
+                    with transaction.atomic():
+                        old_principal = contract.principal
+                        old_plan = contract.plan
+                        
+                        # Mature old contract
+                        contract.status = 'MATURED'
+                        contract.save()
+                        
+                        # Create wallet transactions for auditability
+                        # Re-deposit principal and re-lock
+                        CRMService.credit_wallet(contract.user, old_principal, contract, 'REFUND', f"Maturity Refund for Contract #{contract.id}")
+                        
+                        # Start new contract
+                        new_maturity = target_date + timedelta(days=old_plan.duration_months * 30) # rough estimate
+                        new_contract = Contract.objects.create(
+                            user=contract.user,
+                            plan=old_plan,
+                            principal=old_principal,
+                            interest_rate_apy=old_plan.interest_rate_apy,
+                            status='ACTIVE',
+                            start_date=target_date,
+                            maturity_date=new_maturity,
+                            auto_renew=True
+                        )
+                        MT5Service.create_readonly_account(new_contract)
+                        MT5Service.lock_balance(new_contract)
+                        CRMService.debit_wallet(contract.user, old_principal, new_contract, 'INVESTMENT', f"Auto-Renewal Lock for Contract #{new_contract.id}")
+                    continue
+                else:
+                    # Mark contract as matured, release principal
+                    with transaction.atomic():
+                        contract.status = 'MATURED'
+                        contract.save()
+                        MT5Service.unlock_balance(contract)
+                        CRMService.credit_wallet(contract.user, contract.principal, contract, 'REFUND', f"Maturity Refund for Contract #{contract.id}")
+                    continue
+
+            # Daily rate is APY / 100 / 365
+            apy = contract.interest_rate_apy
+            daily_rate = apy / Decimal('100.00') / Decimal('365.00')
+            daily_interest = contract.principal * daily_rate
+            
+            # Precision rounding
+            daily_interest = daily_interest.quantize(Decimal('0.000001'))
+
+            DailyInterestLog.objects.create(
+                contract=contract,
+                date=target_date,
+                amount=daily_interest
+            )
+            logs_created += 1
+
+        return logs_created
+
