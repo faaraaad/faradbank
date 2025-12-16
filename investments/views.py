@@ -200,3 +200,88 @@ class ContractViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(contract)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
+
+class SimulationStateView(APIView):
+    def get(self, request):
+        return Response({
+            "virtual_date": get_current_virtual_date().strftime('%Y-%m-%d')
+        })
+
+
+class SimulationTimeTravelView(APIView):
+    def post(self, request):
+        days = request.data.get('days')
+        months = request.data.get('months')
+        
+        if days is None and months is None:
+            return Response({"error": "Provide either days or months to fast-forward"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        current_date = get_current_virtual_date()
+        target_date = current_date
+        
+        if days:
+            target_date += timedelta(days=int(days))
+        elif months:
+            # Advance months (approx 30 days per month)
+            target_date += timedelta(days=int(months) * 30)
+
+        logs_created = 0
+        payouts_info = []
+        refunds_info = []
+        date_cursor = current_date
+
+        # Loop through each day in the transition sequence to execute daily interest,
+        # roll rate upgrades, and trigger monthly payouts & cancellation refunds
+        while date_cursor < target_date:
+            date_cursor += timedelta(days=1)
+            
+            # 1. Flip pending plan upgrades on the 1st of the month
+            if date_cursor.day == 1:
+                upgraded_contracts = Contract.objects.filter(pending_upgrade_apy__isnull=False)
+                for contract in upgraded_contracts:
+                    contract.interest_rate_apy = contract.pending_upgrade_apy
+                    contract.pending_upgrade_apy = None
+                    contract.save()
+
+            # 2. Run nightly daily interest calculation
+            daily_logs = InterestEngineService.calculate_daily_interest(date_cursor)
+            logs_created += daily_logs
+
+            # 3. Monthly Interest Settlement payout (runs automatically between the 3rd and 5th of each calendar month)
+            # Let's run it precisely on the 3rd day of the month for the previous month!
+            if date_cursor.day == 3:
+                prev_month = 12 if date_cursor.month == 1 else date_cursor.month - 1
+                prev_year = date_cursor.year - 1 if date_cursor.month == 1 else date_cursor.year
+                
+                payout = InterestEngineService.process_monthly_payout(prev_year, prev_month)
+                if payout['payouts_completed'] > 0:
+                    payouts_info.append({
+                        "date": date_cursor.strftime('%Y-%m-%d'),
+                        "for_period": f"{prev_month:02d}/{prev_year}",
+                        **payout
+                    })
+
+            # 4. Refund processed early-cancellations (scheduled on the 3rd day of next month)
+            # Let's trigger refund processing between the 3rd and 5th of the month
+            if date_cursor.day == 3:
+                refund = InterestEngineService.process_scheduled_refunds(date_cursor)
+                if refund['refunds_processed'] > 0:
+                    refunds_info.append({
+                        "date": date_cursor.strftime('%Y-%m-%d'),
+                        **refund
+                    })
+
+        # Save the new virtual date
+        state = SimulationState.objects.get(id=1)
+        state.virtual_date = target_date
+        state.save()
+
+        return Response({
+            "virtual_date_before": current_date.strftime('%Y-%m-%d'),
+            "virtual_date_after": target_date.strftime('%Y-%m-%d'),
+            "total_days_advanced": (target_date - current_date).days,
+            "daily_interest_logs_created": logs_created,
+            "interest_payouts_executed": payouts_info,
+            "cancellation_refunds_processed": refunds_info
+        })
