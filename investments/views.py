@@ -285,3 +285,5 @@ class SimulationTimeTravelView(APIView):
             "interest_payouts_executed": payouts_info,
             "cancellation_refunds_processed": refunds_info
         })
+
+# Time travel operations and night loops fully active
