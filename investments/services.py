@@ -247,3 +247,57 @@ class InterestEngineService:
 
         return logs_created
 
+    @staticmethod
+    def process_monthly_payout(year, month):
+        """
+        Aggregates daily interest logs from the previous month and pays them into the wallet.
+        This payout runs between the 3rd and 5th of each month.
+        """
+        unpaid_logs = DailyInterestLog.objects.filter(
+            date__year=year,
+            date__month=month,
+            is_paid=False
+        )
+
+        # Group by contract
+        contract_earnings = {}
+        for log in unpaid_logs:
+            contract_earnings[log.contract] = contract_earnings.get(log.contract, Decimal('0.000000')) + log.amount
+
+        payouts_completed = 0
+        total_payout_amount = Decimal('0.00')
+
+        with transaction.atomic():
+            for contract, total_interest in contract_earnings.items():
+                # Round to 2 decimal places for wallet credit
+                rounded_interest = total_interest.quantize(Decimal('0.00'))
+                if rounded_interest <= Decimal('0.00'):
+                    continue
+
+                # Credit wallet
+                CRMService.credit_wallet(
+                    user=contract.user,
+                    amount=rounded_interest,
+                    contract=contract,
+                    tx_type='INTEREST_PAYOUT',
+                    description=f"Monthly Interest Payout for {month:02d}/{year} (Contract #{contract.id})"
+                )
+
+                # Mark all these logs as paid
+                DailyInterestLog.objects.filter(
+                    contract=contract,
+                    date__year=year,
+                    date__month=month
+                ).update(
+                    is_paid=True,
+                    paid_at=timezone.now()
+                )
+
+                payouts_completed += 1
+                total_payout_amount += rounded_interest
+
+        return {
+            "payouts_completed": payouts_completed,
+            "total_payout_amount": float(total_payout_amount)
+        }
+
