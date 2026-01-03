@@ -301,3 +301,39 @@ class InterestEngineService:
             "total_payout_amount": float(total_payout_amount)
         }
 
+
+
+    @staticmethod
+    def calculate_cancellation_invoice(contract):
+        """
+        Helper to preview the cancellation penalty invoice details.
+        Other Plans: 10% penalty of principal + Clawback of all previously PAID interest.
+        1-Month Plan: Non-cancellable (will throw error).
+        """
+        if not contract.plan.is_cancellable:
+            raise ValueError("1-Month Time Deposits are strictly non-cancellable.")
+
+        penalty = (contract.principal * Decimal('0.10')).quantize(Decimal('0.00'))
+        
+        # Aggregate paid daily interest logs
+        paid_logs = DailyInterestLog.objects.filter(contract=contract, is_paid=True)
+        # However, interest is paid in rounded amounts. The sum of paid transactions is the exact amount to claw back.
+        paid_transactions = WalletTransaction.objects.filter(
+            contract=contract,
+            type='INTEREST_PAYOUT'
+        )
+        clawback = sum(tx.amount for tx in paid_transactions)
+        
+        # Just in case transaction amounts are recorded as positive or negative, let's lock absolute values
+        clawback = abs(clawback).quantize(Decimal('0.00'))
+        
+        refund = contract.principal - penalty - clawback
+        if refund < 0:
+            refund = Decimal('0.00')
+
+        return {
+            "principal": float(contract.principal),
+            "penalty": float(penalty),
+            "clawback": float(clawback),
+            "refund": float(refund)
+        }
