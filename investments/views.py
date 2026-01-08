@@ -200,6 +200,53 @@ class ContractViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(contract)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['get', 'post'], url_path='cancel')
+    def cancel_contract(self, request, pk=None):
+        contract = self.get_object()
+        
+        if contract.status != 'ACTIVE':
+            return Response({"error": "Only active contracts can be cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not contract.plan.is_cancellable:
+            return Response({"error": "1-Month Time Deposits are strictly non-cancellable."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1. Calculate invoice preview details
+        invoice = InterestEngineService.calculate_cancellation_invoice(contract)
+
+        if request.method == 'GET':
+            return Response(invoice)
+
+        # 2. Process POST (submit request)
+        virtual_date = get_current_virtual_date()
+        # Scheduled refund is paid between the 3rd and 5th of the FOLLOWING month
+        # So it's 3rd of next month
+        if virtual_date.month == 12:
+            refund_month = 1
+            refund_year = virtual_date.year + 1
+        else:
+            refund_month = virtual_date.month + 1
+            refund_year = virtual_date.year
+            
+        refund_date = date(refund_year, refund_month, 3)
+
+        with transaction.atomic():
+            contract.status = 'PENDING_CANCELLATION'
+            contract.save()
+
+            cancel_req = CancellationRequest.objects.create(
+                contract=contract,
+                requested_by=request.user if request.user.is_authenticated else contract.user,
+                penalty_amount=Decimal(str(invoice['penalty'])),
+                clawback_interest_amount=Decimal(str(invoice['clawback'])),
+                estimated_refund_amount=Decimal(str(invoice['refund'])),
+                refund_date=refund_date
+            )
+
+        return Response({
+            "message": "Cancellation request submitted successfully. Awaiting Manager approval.",
+            "request_details": CancellationRequestSerializer(cancel_req).data
+        })
+
 
 
 class SimulationStateView(APIView):
@@ -285,5 +332,3 @@ class SimulationTimeTravelView(APIView):
             "interest_payouts_executed": payouts_info,
             "cancellation_refunds_processed": refunds_info
         })
-
-# Time travel operations, payouts and night loops active
