@@ -249,6 +249,38 @@ class ContractViewSet(viewsets.ModelViewSet):
 
 
 
+
+class BackOfficeAdminView(APIView):
+    def get(self, request):
+        # 1. Total liquidity (Total AUM)
+        active_contracts = Contract.objects.filter(status__in=['ACTIVE', 'PENDING_CANCELLATION'])
+        total_aum = active_contracts.aggregate(total=Sum('principal'))['total'] or Decimal('0.00')
+
+        # 2. Total Active Users (Users with at least one active/pending contract)
+        active_users = Contract.objects.filter(status__in=['ACTIVE', 'PENDING_CANCELLATION']).values('user').distinct().count()
+
+        # 3. Breakdown per plan
+        plan_breakdown = []
+        plans = InvestmentPlan.objects.all()
+        for p in plans:
+            count = Contract.objects.filter(plan=p, status__in=['ACTIVE', 'PENDING_CANCELLATION']).count()
+            amt = Contract.objects.filter(plan=p, status__in=['ACTIVE', 'PENDING_CANCELLATION']).aggregate(total=Sum('principal'))['total'] or Decimal('0.00')
+            plan_breakdown.append({
+                "plan_id": p.id,
+                "plan_name": p.name,
+                "apy": float(p.interest_rate_apy),
+                "count": count,
+                "amount": float(amt)
+            })
+
+        return Response({
+            "total_aum": float(total_aum),
+            "active_users": active_users,
+            "plan_breakdown": plan_breakdown
+        })
+
+
+
 class SimulationStateView(APIView):
     def get(self, request):
         return Response({
