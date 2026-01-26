@@ -280,6 +280,64 @@ class BackOfficeAdminView(APIView):
         })
 
 
+class BackOfficeCancellationsView(APIView):
+    def get(self, request):
+        reqs = CancellationRequest.objects.filter(status='PENDING').order_by('-requested_at')
+        serializer = CancellationRequestSerializer(reqs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        req_id = request.data.get('request_id')
+        action = request.data.get('action') # APPROVE or REJECT
+        rejection_reason = request.data.get('rejection_reason', '')
+
+        if not req_id or not action:
+            return Response({"error": "request_id and action are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cancel_req = CancellationRequest.objects.get(id=req_id)
+        except CancellationRequest.DoesNotExist:
+            return Response({"error": "Cancellation request not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if cancel_req.status != 'PENDING':
+            return Response({"error": "Request has already been processed"}, status=status.HTTP_400_BAD_REQUEST)
+
+        contract = cancel_req.contract
+
+        if action == 'APPROVE':
+            with transaction.atomic():
+                cancel_req.status = 'APPROVED'
+                cancel_req.resolved_at = timezone.now()
+                # Scheduled refund remains at the 3rd of the following month (already set in create)
+                cancel_req.save()
+                
+                # Keep contract in PENDING_CANCELLATION status. Refund cron will unlock and refund on schedule
+                
+            return Response({
+                "message": "Cancellation request approved. Principal release is scheduled for the next monthly settlement cycle (3rd-5th).",
+                "request": CancellationRequestSerializer(cancel_req).data
+            })
+        
+        elif action == 'REJECT':
+            with transaction.atomic():
+                cancel_req.status = 'REJECTED'
+                cancel_req.rejection_reason = rejection_reason
+                cancel_req.resolved_at = timezone.now()
+                cancel_req.save()
+
+                # Revert contract back to ACTIVE
+                contract.status = 'ACTIVE'
+                contract.save()
+
+            return Response({
+                "message": "Cancellation request rejected. Contract has been restored to active status.",
+                "request": CancellationRequestSerializer(cancel_req).data
+            })
+
+        return Response({"error": "Invalid action"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 
 class SimulationStateView(APIView):
     def get(self, request):
