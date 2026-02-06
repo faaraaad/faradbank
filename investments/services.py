@@ -301,7 +301,76 @@ class InterestEngineService:
             "total_payout_amount": float(total_payout_amount)
         }
 
+    @staticmethod
+    def process_scheduled_refunds(target_date):
+        """
+        Refunds early-cancelled contracts.
+        Runs when the virtual date matches the scheduled refund date or is between the 3rd and 5th of the refund month.
+        Refund Amount = Principal - 10% Penalty - Clawback of all paid interest
+        """
+        # Find approved requests where refund date matches target_date
+        # or has passed and status is still PENDING_CANCELLATION in contract
+        pending_refunds = CancellationRequest.objects.filter(
+            status='APPROVED',
+            refund_date__lte=target_date,
+            contract__status='PENDING_CANCELLATION'
+        )
 
+        processed_count = 0
+        total_refunded = Decimal('0.00')
+
+        for req in pending_refunds:
+            contract = req.contract
+            user = contract.user
+            
+            with transaction.atomic():
+                # Unlock balance from MT5
+                MT5Service.unlock_balance(contract)
+
+                # 1. Debit the wallet / apply the penalty & clawback
+                # Since the principal was already deducted from their wallet initially,
+                # we just refund the NET amount (Principal - Penalty - Clawback).
+                # But to maintain full audits, we credit the principal back and create negative txs for penalty & clawback.
+                
+                # Credit principal refund
+                CRMService.credit_wallet(
+                    user=user,
+                    amount=contract.principal,
+                    contract=contract,
+                    tx_type='REFUND',
+                    description=f"Principal Release for Early Cancel Contract #{contract.id}"
+                )
+
+                # Debit Penalty (10% of Principal)
+                CRMService.debit_wallet(
+                    user=user,
+                    amount=req.penalty_amount,
+                    contract=contract,
+                    tx_type='PENALTY',
+                    description=f"10% Early Cancellation Penalty on Contract #{contract.id}"
+                )
+
+                # Debit Clawback (all interest paid so far)
+                if req.clawback_interest_amount > 0:
+                    CRMService.debit_wallet(
+                        user=user,
+                        amount=req.clawback_interest_amount,
+                        contract=contract,
+                        tx_type='CLAWBACK',
+                        description=f"Clawback of previously paid interest on Contract #{contract.id}"
+                    )
+
+                # Update contract status to CANCELLED
+                contract.status = 'CANCELLED'
+                contract.save()
+
+                processed_count += 1
+                total_refunded += req.estimated_refund_amount
+
+        return {
+            "refunds_processed": processed_count,
+            "total_refunded_amount": float(total_refunded)
+        }
 
     @staticmethod
     def calculate_cancellation_invoice(contract):
