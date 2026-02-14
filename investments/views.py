@@ -247,6 +247,51 @@ class ContractViewSet(viewsets.ModelViewSet):
             "request_details": CancellationRequestSerializer(cancel_req).data
         })
 
+    @action(detail=True, methods=['post'], url_path='upgrade')
+    def upgrade_contract(self, request, pk=None):
+        contract = self.get_object()
+        new_plan_id = request.data.get('plan_id')
+
+        if contract.status != 'ACTIVE':
+            return Response({"error": "Only active contracts can be upgraded."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_plan = InvestmentPlan.objects.get(id=new_plan_id)
+        except InvestmentPlan.DoesNotExist:
+            return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Permitted only toward longer-term plans
+        if new_plan.duration_months <= contract.plan.duration_months:
+            return Response({"error": "Upgrades are only permitted to longer-term plans."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Calculate extension
+        month_difference = new_plan.duration_months - contract.plan.duration_months
+        days_to_add = month_difference * 30
+        
+        with transaction.atomic():
+            old_plan_name = contract.plan.name
+            contract.plan = new_plan
+            contract.maturity_date = contract.maturity_date + timedelta(days=days_to_add)
+            
+            # The rate will change from the next calendar month.
+            # We record it in pending_upgrade_apy
+            contract.pending_upgrade_apy = new_plan.interest_rate_apy
+            contract.save()
+
+            # Audit CRM Integration Log / Log change
+            IntegrationLog.objects.create(
+                action='PLAN_UPGRADE',
+                contract=contract,
+                request_payload=json.dumps({"contract_id": contract.id, "from_plan": old_plan_name, "to_plan": new_plan.name}),
+                response_payload=json.dumps({"status": "PENDING_RATE_CHANGE", "new_rate_active_date": "1st of next month"}),
+                status='SUCCESS'
+            )
+
+        return Response({
+            "message": f"Successfully upgraded contract #{contract.id} to {new_plan.name}. The new APY will activate from the next calendar month.",
+            "contract": ContractSerializer(contract, context={'virtual_date': get_current_virtual_date()}).data
+        })
+
 
 
 
