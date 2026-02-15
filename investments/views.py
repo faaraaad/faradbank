@@ -292,6 +292,17 @@ class ContractViewSet(viewsets.ModelViewSet):
             "contract": ContractSerializer(contract, context={'virtual_date': get_current_virtual_date()}).data
         })
 
+    @action(detail=True, methods=['post'], url_path='toggle-renewal')
+    def toggle_renewal(self, request, pk=None):
+        contract = self.get_object()
+        contract.auto_renew = not contract.auto_renew
+        contract.save()
+        return Response({
+            "auto_renew": contract.auto_renew,
+            "message": f"Auto-renewal is now {'enabled' if contract.auto_renew else 'disabled'}."
+        })
+
+
 
 
 
