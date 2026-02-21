@@ -393,6 +393,44 @@ class BackOfficeCancellationsView(APIView):
         return Response({"error": "Invalid action"}, status=status.HTTP_400_BAD_REQUEST)
 
 
+class BackOfficeFinancialReportingView(APIView):
+    def get(self, request):
+        virtual_date = get_current_virtual_date()
+        
+        # 1. Total payable interest for the previous month
+        # (unpaid DailyInterestLog for previous month)
+        prev_month = 12 if virtual_date.month == 1 else virtual_date.month - 1
+        prev_year = virtual_date.year - 1 if virtual_date.month == 1 else virtual_date.year
+
+        unpaid_amount = DailyInterestLog.objects.filter(
+            date__year=prev_year,
+            date__month=prev_month,
+            is_paid=False
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+        # 2. Contracts reaching maturity in the following calendar month
+        # e.g., if virtual_date is May 19, following month is June
+        next_month = 1 if virtual_date.month == 12 else virtual_date.month + 1
+        next_year = virtual_date.year + 1 if virtual_date.month == 12 else virtual_date.year
+
+        maturing_contracts = Contract.objects.filter(
+            maturity_date__year=next_year,
+            maturity_date__month=next_month,
+            status='ACTIVE'
+        )
+        maturing_serializer = ContractSerializer(maturing_contracts, many=True, context={'virtual_date': virtual_date})
+
+        return Response({
+            "previous_month_payable_interest": {
+                "year": prev_year,
+                "month": prev_month,
+                "month_name": calendar.month_name[prev_month],
+                "payable_amount": float(unpaid_amount)
+            },
+            "maturing_contracts_next_month": maturing_serializer.data
+        })
+
+
 
 
 class SimulationStateView(APIView):

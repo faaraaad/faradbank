@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AuthLoginView, WalletView, TransactionHistoryView, 
     InvestmentPlanViewSet, ContractViewSet, SimulationStateView, SimulationTimeTravelView,
-    BackOfficeAdminView, BackOfficeCancellationsView
+    BackOfficeAdminView, BackOfficeCancellationsView, BackOfficeFinancialReportingView
 )
 
 router = DefaultRouter()
@@ -18,6 +18,7 @@ urlpatterns = [
     # Back Office Admin
     path('admin/overview/', BackOfficeAdminView.as_view(), name='admin_overview'),
     path('admin/cancellations/', BackOfficeCancellationsView.as_view(), name='admin_cancellations'),
+    path('admin/reporting/', BackOfficeFinancialReportingView.as_view(), name='admin_reporting'),
     
     # Simulation Control
     path('simulation/state/', SimulationStateView.as_view(), name='simulation_state'),
