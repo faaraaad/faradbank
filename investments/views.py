@@ -303,7 +303,40 @@ class ContractViewSet(viewsets.ModelViewSet):
         })
 
 
+class InvestorDashboardOverview(APIView):
+    def get(self, request):
+        username = request.query_params.get('username')
+        if not username:
+            return Response({"error": "Username required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        virtual_date = get_current_virtual_date()
+
+        # 1. Total Assets (Active and Pending cancellation principal)
+        active_contracts = Contract.objects.filter(user__username=username, status__in=['ACTIVE', 'PENDING_CANCELLATION'])
+        total_assets = active_contracts.aggregate(total=Sum('principal'))['total'] or Decimal('0.00')
+
+        # 2. Total Interest Received (Sum of paid daily logs or INTEREST_PAYOUT txs)
+        payout_txs = WalletTransaction.objects.filter(user__username=username, type='INTEREST_PAYOUT')
+        total_received = payout_txs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+        # 3. Estimated Interest for the Next Month
+        # Sum of: (Principal * APY / 100 / 12) for all active contracts next month
+        # We also check if the active contract has a pending upgrade.
+        estimated_next_month = Decimal('0.00')
+        for contract in Contract.objects.filter(user__username=username, status='ACTIVE'):
+            # If there's an upgrade pending, the rate will flip to new APY next month
+            rate = contract.pending_upgrade_apy if contract.pending_upgrade_apy else contract.interest_rate_apy
+            monthly_interest = contract.principal * (rate / Decimal('100.00') / Decimal('12.00'))
+            estimated_next_month += monthly_interest
+
+        estimated_next_month = estimated_next_month.quantize(Decimal('0.00'))
+
+        return Response({
+            "total_assets": float(total_assets),
+            "total_interest_received": float(total_received),
+            "estimated_next_month": float(estimated_next_month),
+            "virtual_date": virtual_date.strftime('%Y-%m-%d')
+        })
 
 
 class BackOfficeAdminView(APIView):
@@ -431,6 +464,33 @@ class BackOfficeFinancialReportingView(APIView):
         })
 
 
+class BackOfficeUserAuditView(APIView):
+    def get(self, request):
+        users = User.objects.filter(profile__role='INVESTOR').order_by('username')
+        audit_list = []
+        for u in users:
+            contracts = Contract.objects.filter(user=u).order_by('-created_at')
+            plan_changes = IntegrationLog.objects.filter(contract__user=u, action='PLAN_UPGRADE').order_by('-created_at')
+            
+            audit_list.append({
+                "username": u.username,
+                "email": u.email,
+                "balance": float(u.profile.balance),
+                "contracts_count": contracts.count(),
+                "contracts": ContractSerializer(contracts, many=True, context={'virtual_date': get_current_virtual_date()}).data,
+                "plan_changes_log": IntegrationLogSerializer(plan_changes, many=True).data
+            })
+        return Response(audit_list)
+
+
+class IntegrationLogListView(APIView):
+    def get(self, request):
+        logs = IntegrationLog.objects.all().order_by('-created_at')[:100] # Cap at last 100
+        serializer = IntegrationLogSerializer(logs, many=True)
+        return Response({
+            "mt5_connection_status": MT5Service.get_ping_status(),
+            "logs": serializer.data
+        })
 
 
 class SimulationStateView(APIView):
