@@ -86,8 +86,6 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'contract', 'amount', 'type', 'description', 'created_at']
 
 
-
-
 class CancellationRequestSerializer(serializers.ModelSerializer):
     contract_details = ContractSerializer(source='contract', read_only=True)
     username = serializers.CharField(source='contract.user.username', read_only=True)
@@ -103,8 +101,6 @@ class CancellationRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ['requested_by', 'requested_at', 'status', 'penalty_amount', 
                            'clawback_interest_amount', 'estimated_refund_amount', 'refund_date', 
                            'resolved_by', 'resolved_at']
-
-
 
 
 class IntegrationLogSerializer(serializers.ModelSerializer):
