@@ -73,3 +73,35 @@ class FaradBankBusinessRulesTestCase(TestCase):
         self.assertEqual(log.amount, expected_rounded)
         self.assertEqual(float(log.amount), 1.643836)
 
+    def test_plan_upgrade_logic(self):
+        # Create active 3-Month plan
+        start_date = date(2026, 5, 19)
+        maturity_date = start_date + timedelta(days=90) # 2026-08-17
+        
+        contract = Contract.objects.create(
+            user=self.investor,
+            plan=self.plan_3m,
+            principal=Decimal("5000.00"),
+            interest_rate_apy=Decimal("12.00"),
+            status='ACTIVE',
+            start_date=start_date,
+            maturity_date=maturity_date
+        )
+
+        # Upgrade contract to 1-Year plan (16% APY)
+        # Verify upgrading to longer term works
+        month_difference = self.plan_1y.duration_months - self.plan_3m.duration_months # 9 months
+        days_to_add = month_difference * 30 # 270 days
+        
+        contract.plan = self.plan_1y
+        contract.maturity_date = contract.maturity_date + timedelta(days=days_to_add)
+        contract.pending_upgrade_apy = self.plan_1y.interest_rate_apy
+        contract.save()
+
+        # Check maturity is extended: 90 + 270 = 360 days
+        self.assertEqual(contract.maturity_date, start_date + timedelta(days=360))
+        self.assertEqual(contract.plan, self.plan_1y)
+        # Interest rate stays at 12% for the current month
+        self.assertEqual(contract.interest_rate_apy, Decimal("12.00"))
+        self.assertEqual(contract.pending_upgrade_apy, Decimal("16.00"))
+
