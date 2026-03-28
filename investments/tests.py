@@ -105,3 +105,52 @@ class FaradBankBusinessRulesTestCase(TestCase):
         self.assertEqual(contract.interest_rate_apy, Decimal("12.00"))
         self.assertEqual(contract.pending_upgrade_apy, Decimal("16.00"))
 
+    def test_early_cancellation_penalties(self):
+        start_date = date(2026, 5, 19)
+        contract = Contract.objects.create(
+            user=self.investor,
+            plan=self.plan_3m,
+            principal=Decimal("5000.00"),
+            interest_rate_apy=Decimal("12.00"),
+            status='ACTIVE',
+            start_date=start_date,
+            maturity_date=start_date + timedelta(days=90)
+        )
+
+        # 1. 1-Month Plan constraint check
+        contract_1m = Contract.objects.create(
+            user=self.investor,
+            plan=self.plan_1m,
+            principal=Decimal("1000.00"),
+            interest_rate_apy=Decimal("10.00"),
+            status='ACTIVE',
+            start_date=start_date,
+            maturity_date=start_date + timedelta(days=30)
+        )
+        with self.assertRaises(ValueError):
+            InterestEngineService.calculate_cancellation_invoice(contract_1m)
+
+        # 2. Add some paid interest to contract (to check clawback)
+        DailyInterestLog.objects.create(
+            contract=contract,
+            date=start_date,
+            amount=Decimal("1.64"),
+            is_paid=True
+        )
+        # Create standard transaction to mimic CRM ledger payment
+        WalletTransaction.objects.create(
+            user=self.investor,
+            contract=contract,
+            amount=Decimal("1.64"),
+            type="INTEREST_PAYOUT"
+        )
+
+        # Generate invoice
+        invoice = InterestEngineService.calculate_cancellation_invoice(contract)
+        # Penalty = 10% of 5000 = 500
+        # Clawback = 1.64
+        # Refund = 5000 - 500 - 1.64 = 4498.36
+        self.assertEqual(invoice["penalty"], 500.00)
+        self.assertEqual(invoice["clawback"], 1.64)
+        self.assertEqual(invoice["refund"], 4498.36)
+
