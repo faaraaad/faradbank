@@ -154,3 +154,35 @@ class FaradBankBusinessRulesTestCase(TestCase):
         self.assertEqual(invoice["clawback"], 1.64)
         self.assertEqual(invoice["refund"], 4498.36)
 
+    def test_monthly_payout_execution(self):
+        start_date = date(2026, 5, 1)
+        contract = Contract.objects.create(
+            user=self.investor,
+            plan=self.plan_3m,
+            principal=Decimal("5000.00"),
+            interest_rate_apy=Decimal("12.00"),
+            status='ACTIVE',
+            start_date=start_date,
+            maturity_date=start_date + timedelta(days=90)
+        )
+
+        # Create two daily interest logs for May
+        DailyInterestLog.objects.create(contract=contract, date=date(2026, 5, 1), amount=Decimal("1.6438"))
+        DailyInterestLog.objects.create(contract=contract, date=date(2026, 5, 2), amount=Decimal("1.6438"))
+
+        # Run monthly payout for May 2026
+        result = InterestEngineService.process_monthly_payout(2026, 5)
+        
+        # 2 logs, total = 3.2876, rounded = 3.29
+        self.assertEqual(result["payouts_completed"], 1)
+        self.assertEqual(result["total_payout_amount"], 3.29)
+        
+        # Check wallet transaction created
+        tx = WalletTransaction.objects.filter(user=self.investor, type="INTEREST_PAYOUT").first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.amount, Decimal("3.29"))
+
+        # Check logs updated to is_paid
+        logs = DailyInterestLog.objects.filter(contract=contract)
+        for log in logs:
+            self.assertTrue(log.is_paid)
